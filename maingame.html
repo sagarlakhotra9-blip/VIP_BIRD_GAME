@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>ILLUMINATI Bird Game - Countdown</title>
+  <style>
+    body { background: #222; color:#fff; text-align:center; font-family:sans-serif; }
+    #gameCanvas { background: #d0e8fd; display: block; margin: 30px auto; border-radius: 16px; box-shadow: 0 0 20px #444; }
+    .logo, .goodbye { 
+      position:absolute; left:0; top:0; width:100vw; height:100vh; display:flex; align-items:center; justify-content:center; 
+      background:rgba(34,39,54,0.88); color:#ffe066; font-size:3vw; font-weight:bold; letter-spacing:0.09em; 
+      z-index:10; animation:logoIn 2s cubic-bezier(.75,0,.22,1);
+    }
+    @keyframes logoIn {
+      from { opacity: 0; transform:scale(0.8);}
+      to { opacity: 1; transform:scale(1);}
+    }
+    .modeBox {
+      margin-top:18px;
+      display:flex;
+      justify-content:center;
+      gap:26px;
+    }
+    .modeBtn {
+      font-size:22px;
+      background:#4078c0;
+      color:#fff;
+      border:none;
+      border-radius:12px;
+      padding:16px 36px;
+      cursor:pointer;
+      box-shadow:0 2px 14px #1113;
+      transition:background 0.18s;
+    }
+    .modeBtn:hover { background:#ffe066; color:#222;}
+    #startBtn {
+      padding:15px 35px; font-size:20px; background:#0077b6; color:#fff; border:0; border-radius:8px; cursor:pointer; margin:25px 0 15px 0; 
+      box-shadow:0 2px 14px #1113;
+    }
+    #score, #msg { margin: 8px 0; font-size: 22px; font-weight: bold; }
+    .levelAnim {
+      position:absolute; left:0; top:0; width:100vw; height:100vh; display:flex; justify-content:center; align-items:center;
+      z-index:20; font-size:4vw; color:#fff; font-weight:bold; letter-spacing:0.06em; 
+      background:rgba(38,55,122,0.79); animation:levelReveal 1.6s;
+    }
+    @keyframes levelReveal {
+      0% { opacity:0; transform:scale(0.7);}
+      70% {opacity:1;}
+      100% {opacity:0; transform:scale(1.13);}
+    }
+    .countdownOverlay {
+      position:absolute; left:0; top:0; width:100vw; height:100vh;
+      display:flex; justify-content:center; align-items:center;
+      background:rgba(0,0,0,0.7); color:#fff;
+      font-size:8vw; font-weight:bold; z-index:30;
+      user-select:none;
+    }
+  </style>
+</head>
+<body>
+<canvas id="gameCanvas" width="350" height="520"></canvas><br>
+<button id="startBtn" style="display:none;">Start Game</button>
+<div id="modePicker" style="display:none;">
+  <div style="margin-top:8px;font-size:21px;">Select Mode</div>
+  <div class="modeBox">
+    <button class="modeBtn" data-mode="easy">Easy</button>
+    <button class="modeBtn" data-mode="medium">Medium</button>
+    <button class="modeBtn" data-mode="hard">Hard</button>
+  </div>
+</div>
+<div id="score"></div>
+<div id="msg"></div>
+
+<audio id="flapSound" src="https://scottthepilot.com/flap.wav" preload="auto"></audio>
+<audio id="scoreSound" src="https://scottthepilot.com/score.wav" preload="auto"></audio>
+<audio id="hitSound" src="https://scottthepilot.com/hit.wav" preload="auto"></audio>
+
+<div class="logo" id="logoBox">ILLUMINATI</div>
+<div class="levelAnim" id="levelAnim" style="display:none;"></div>
+<div class="goodbye" id="gbBox" style="display:none;">Good Bye!</div>
+<div class="countdownOverlay" id="countdownOverlay" style="display:none;">3</div>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+const startBtn = document.getElementById("startBtn");
+const modePicker = document.getElementById("modePicker");
+const scoreDiv = document.getElementById("score");
+const msgDiv = document.getElementById("msg");
+const flapSound = document.getElementById("flapSound");
+const scoreSound = document.getElementById("scoreSound");
+const hitSound = document.getElementById("hitSound");
+const logoBox = document.getElementById("logoBox");
+const gbBox = document.getElementById("gbBox");
+const levelAnim = document.getElementById("levelAnim");
+const countdownOverlay = document.getElementById("countdownOverlay");
+
+const W = 350, H = 520;
+
+let bird, pipes, playing, score, gravity, jump, animationFrame, started, mode;
+let pipeSpeed, pipeGap;
+let state = "logo"; // logo, menu, level, count, play, over
+
+function resetGame() {
+  bird = { x:60, y:H/2, vy:0, size:26, color:"#ffe066" };
+  pipes = [];
+  score = 0;
+  playing = false;
+  started = false;
+  gravity = 0.65;
+  jump = -7.9;
+  msgDiv.textContent = "";
+  scoreDiv.textContent = "Score: 0";
+}
+
+function drawBackground(frame=0) {
+  let grad = ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'#38a3a5');
+  grad.addColorStop(1,'#22577a');
+  ctx.fillStyle=grad; ctx.fillRect(0,0,W,H);
+  // Sun
+  ctx.save();
+  ctx.globalAlpha=0.84;
+  ctx.beginPath();
+  ctx.arc(W-80,70,40,0,2*Math.PI);
+  ctx.fillStyle="#ffe066";
+  ctx.shadowBlur=40; ctx.shadowColor="#fff599";
+  ctx.fill(); ctx.globalAlpha=1; ctx.restore();
+  // Parallax mountains
+  for(let k=0;k<2;++k){
+    let offset = (frame/(12+k*7))%W;
+    ctx.beginPath();
+    ctx.moveTo(-offset,H-80-35*k);
+    ctx.quadraticCurveTo(40-offset,H-180-25*k,100-offset,H-80-40*k);
+    ctx.quadraticCurveTo(170-offset,H-60-45*k,250-offset,H-120-30*k);
+    ctx.quadraticCurveTo(320-offset,H-50-5*k,480-offset,H-70-25*k);
+    ctx.lineTo(W,H); ctx.lineTo(0,H); ctx.closePath();
+    ctx.fillStyle = k? "#6797c3" : "#bcdff1";
+    ctx.globalAlpha=0.5+0.25*k; ctx.fill(); ctx.globalAlpha=1;
+  }
+  // Moving clouds
+  for(let i=0;i<3;++i){
+    let cx = 80+i*100+20*Math.sin(frame/33+i);
+    let cy = 40+14*i+6*Math.cos(frame/27+i);
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, 30,16,0,0,2*Math.PI);
+    ctx.ellipse(cx+18, cy+3, 19,11,0,0,2*Math.PI);
+    ctx.ellipse(cx-18, cy-2, 14,10,0,0,2*Math.PI);
+    ctx.fillStyle="#fff";
+    ctx.globalAlpha=0.55; ctx.fill(); ctx.globalAlpha=1;
+  }
+}
+
+function drawBird(anim=false, frame=0) {
+  ctx.save(); ctx.translate(bird.x,bird.y);
+  if(anim) ctx.rotate(Math.sin(frame/9)*0.2);
+  ctx.beginPath(); ctx.arc(0,0, bird.size/2, 0, 2*Math.PI);
+  ctx.fillStyle = bird.color;
+  ctx.shadowBlur=anim?22:9; ctx.shadowColor=bird.color;
+  ctx.fill(); ctx.strokeStyle="#374151";ctx.lineWidth=2.5;ctx.stroke();
+  if(anim){ // Flapping wings
+    ctx.beginPath();
+    ctx.ellipse(-8,6,9,3+Math.sin(frame/5)*6,Math.PI/3,0,2*Math.PI);
+    ctx.fillStyle="#fec89a"; ctx.globalAlpha=0.75;ctx.fill(); ctx.globalAlpha=1;
+  }
+  // Beak
+  ctx.beginPath();ctx.moveTo(13,0);
+  ctx.lineTo(22,3); ctx.lineTo(13,6); ctx.closePath();
+  ctx.fillStyle="#ffae42";ctx.fill();
+  // Eye
+  ctx.beginPath();ctx.arc(7,-4,3,0,2*Math.PI);
+  ctx.fillStyle="#fff";ctx.fill();
+  ctx.beginPath();ctx.arc(8,-4,1.2,0,2*Math.PI); ctx.fillStyle="#242113";ctx.fill();
+  ctx.restore();
+}
+
+function makePipe() {
+  pipes.push({ x:W, top: Math.floor(Math.random()*250)+48, w:50, gap:pipeGap });
+}
+function drawPipes() {
+  pipes.forEach(pipe => {
+    ctx.fillStyle="#48a868";
+    ctx.fillRect(pipe.x, 0, pipe.w, pipe.top);
+    ctx.fillRect(pipe.x, pipe.top+pipe.gap, pipe.w, H-pipe.top-pipe.gap);
+    ctx.save(); ctx.globalAlpha=0.15;ctx.fillStyle="#222";
+    ctx.fillRect(pipe.x+pipe.w-5,0,5,H); ctx.restore();
+    ctx.strokeStyle="#222";ctx.lineWidth=2;
+    ctx.strokeRect(pipe.x,0,pipe.w,pipe.top);ctx.strokeRect(pipe.x,pipe.top+pipe.gap,pipe.w,H-pipe.top-pipe.gap);
+  });
+}
+
+function gameLoop(frame=0) {
+  if(!playing) return;
+  ctx.clearRect(0,0,W,H); drawBackground(frame);
+
+  bird.vy += gravity; bird.y += bird.vy; drawBird(false, frame);
+
+  pipes.forEach(pipe => pipe.x -= pipeSpeed);
+  if(pipes.length==0 || pipes[pipes.length-1].x<180) makePipe();
+  drawPipes();
+
+  let hit = pipes.some(pipe =>
+    bird.x+bird.size/2 > pipe.x && bird.x-bird.size/2 < pipe.x+pipe.w &&
+    (bird.y-bird.size/2 < pipe.top || bird.y+bird.size/2 > pipe.top+pipe.gap)
+  );
+  if(hit || bird.y+bird.size/2>H || bird.y-bird.size/2<0){
+    hitSound.play();
+    playing=false;
+    msgDiv.textContent='Game Over! Final Score: ' + score;
+    showGoodbye();
+    return;
+  }
+  pipes.forEach(pipe=>{
+    if(!pipe.passed && pipe.x+pipe.w<bird.x){
+      score++;pipe.passed=1;scoreDiv.textContent='Score: '+score; scoreSound.play();
+    }
+  });
+  animationFrame=requestAnimationFrame(()=>gameLoop(frame+1));
+}
+
+// --- Cinematic Logo Sequence ---
+function showLogo() {
+  logoBox.style.display="flex";
+  setTimeout(()=>{
+    logoBox.style.display="none";
+    showMenu();
+  },2400);
+}
+function showMenu() {
+  state = "menu";
+  startBtn.style.display="inline-block";
+}
+startBtn.onclick = () => {
+  startBtn.style.display="none";
+  modePicker.style.display="block";
+};
+// --- Mode Selection ---
+Array.from(modePicker.querySelectorAll(".modeBtn")).forEach(btn=>{
+  btn.onclick = ()=>{
+    modePicker.style.display="none";
+    mode = btn.dataset.mode;
+    if(mode==="easy"){ pipeSpeed=1.8; pipeGap=170; gravity=0.65; jump=-7.9; }
+    else if(mode==="medium"){ pipeSpeed=2.5; pipeGap=130; gravity=0.75; jump=-8.8; }
+    else { pipeSpeed=3.1; pipeGap=100; gravity=0.8; jump=-9.1; }
+    startCountdown();
+  };
+});
+
+// --- 3-2-1 Countdown ---
+function startCountdown(){
+  let count = 3;
+  countdownOverlay.style.display = "flex";
+  countdownOverlay.textContent = count;
+  let countdownInterval = setInterval(() => {
+    count--;
+    if(count > 0){
+      countdownOverlay.textContent = count;
+    } else {
+      clearInterval(countdownInterval);
+      countdownOverlay.style.display = "none";
+      showLevelAnimation(mode);
+    }
+  }, 1000);
+}
+
+function showLevelAnimation(text){
+  levelAnim.innerText = text[0].toUpperCase() + text.slice(1) + " Mode!";
+  levelAnim.style.display = "flex";
+  setTimeout(()=>{
+    levelAnim.style.display = "none";
+    startGame();
+  },1500);
+}
+// --- Start Game ---
+function startGame(){
+  state = "play";
+  resetGame();
+  playing = true;
+  started = true;
+  gameLoop(0);
+  scoreDiv.textContent = "Score: 0";
+  msgDiv.textContent = "Click or SPACE/UP to flap!";
+}
+
+// --- Good Bye Animation ---
+function showGoodbye(){
+  gbBox.style.display="flex";
+  setTimeout(()=>{
+    gbBox.style.display="none";
+    showMenu();
+  },1700);
+}
+
+canvas.onclick = ()=>{ if(playing){ bird.vy=jump; flapSound.play(); } };
+document.onkeydown = e => { if(playing && (e.key==' '||e.key=='ArrowUp')) { bird.vy=jump; flapSound.play(); } };
+
+resetGame();
+drawBackground(0);
+drawBird(true,0);
+scoreDiv.textContent='';
+msgDiv.textContent='';
+
+setTimeout(showLogo, 500); // Start with logo
+
+</script>
+</body>
+</html>
